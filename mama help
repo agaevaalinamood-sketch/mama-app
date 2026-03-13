@@ -1,0 +1,142 @@
+import { useState, useEffect, useRef } from "react";
+
+export default function Home() {
+  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [tasks, setTasks] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  // Telegram login
+  const loginTelegram = async () => {
+    const telegramId = prompt("Введите Telegram ID");
+    const name = prompt("Введите имя");
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ telegramId, name }),
+    });
+    const data = await res.json();
+    setToken(data.token);
+    localStorage.setItem("token", data.token);
+    alert("Вход выполнен! Подписка: " + (data.subscriptionActive ? "активна" : "нет"));
+  };
+
+  // Load tasks
+  useEffect(() => {
+    if (!token) return;
+    fetch("/api/tasks", { headers: { Authorization: "Bearer " + token } })
+      .then(res => res.json())
+      .then(setTasks);
+  }, [token]);
+
+  // Voice recognition
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.lang = "ru-RU";
+    recognitionRef.current.continuous = true;
+    recognitionRef.current.onresult = e => {
+      const transcript = Array.from(e.results).map(r => r[0].transcript).join("");
+      setInput(prev => prev + " " + transcript);
+    };
+    recognitionRef.current.onend = () => setListening(false);
+  }, []);
+
+  const toggleListening = () => {
+    if (listening) recognitionRef.current.stop();
+    else {
+      recognitionRef.current.start();
+      setListening(true);
+    }
+  };
+
+  const sendToAI = async (imageBase64 = null) => {
+    if (!input.trim() && !imageBase64) return;
+    setLoading(true);
+    const res = await fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ text: input, imageBase64 }),
+    });
+    const task = await res.json();
+    setTasks([task, ...tasks]);
+    setInput("");
+    setLoading(false);
+  };
+
+  const handlePhoto = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => sendToAI(reader.result.split(",")[1]);
+    reader.readAsDataURL(file);
+  };
+
+  if (!token)
+    return (
+      <div className="flex items-center justify-center h-screen bg-[#FEFAE0]">
+        <button className="p-6 bg-olive rounded-2xl text-white text-xl font-bold shadow-lg hover:scale-105 transition-transform" onClick={loginTelegram}>
+          Войти через Telegram
+        </button>
+      </div>
+    );
+
+  return (
+    <div className="p-6 max-w-md mx-auto bg-[#FEFAE0] min-h-screen">
+      <h1 className="text-3xl font-extrabold text-[#5F6F52] mb-6">Чистая Голова</h1>
+
+      <textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="Напиши или наговори свои мысли..."
+        className="w-full p-4 rounded-3xl border-2 border-[#B99470] mb-4 focus:ring-4 focus:ring-[#B99470]/30 outline-none resize-none h-32"
+      />
+
+      <div className="flex space-x-4 mb-4">
+        <button
+          onClick={toggleListening}
+          className={`p-4 rounded-full shadow-lg flex items-center justify-center text-xl transition-all ${
+            listening ? "bg-red-500 text-white animate-pulse" : "bg-white text-[#5F6F52] hover:scale-105"
+          }`}
+        >
+          {listening ? "⏹️" : "🎤"}
+        </button>
+
+        <label className="p-4 bg-white rounded-full shadow-lg flex items-center justify-center cursor-pointer text-[#5F6F52] hover:scale-105 transition-transform text-xl">
+          📷
+          <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+        </label>
+
+        <button
+          onClick={() => sendToAI()}
+          disabled={loading}
+          className="flex-1 p-4 bg-[#5F6F52] text-white font-bold rounded-3xl shadow-lg hover:scale-105 transition-transform"
+        >
+          {loading ? "✨ Наводим порядок в мыслях..." : "Разобрать мысли"}
+        </button>
+      </div>
+
+      {loading && (
+        <div className="w-full h-2 bg-[#B99470]/20 rounded-full mb-4 overflow-hidden">
+          <div className="h-2 bg-[#B99470] animate-pulse w-1/2"></div>
+        </div>
+      )}
+
+      <h2 className="mt-6 text-2xl font-bold text-[#5F6F52] mb-4">История</h2>
+      <div className="space-y-4">
+        {tasks.map((task) => (
+          <div
+            key={task._id}
+            className="p-4 rounded-2xl shadow-md bg-white border-l-4 border-[#B99470] transform transition-all hover:scale-105"
+          >
+            <div className="text-gray-400 text-xs mb-1">{new Date(task.date).toLocaleString()}</div>
+            <div className="text-sm leading-relaxed text-[#3E4B34] whitespace-pre-wrap">{task.aiResult}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
