@@ -10,43 +10,22 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;500;800&display=swap" rel="stylesheet">
     <style>
-        :root { --olive: #5F6F52; --cream: #FEFAE0; }
         body { 
             font-family: 'Manrope', sans-serif; 
             background-color: #fcfbf4; 
-            color: #2c3327; 
             margin: 0; 
-            touch-action: manipulation;
-        }
-        .app-shell { 
-            max-width: 430px; 
-            margin: 0 auto; 
-            min-height: 100vh; 
-            display: flex; 
-            flex-direction: column; 
-            position: relative; 
-            background: #fcfbf4; 
+            overscroll-behavior: none;
         }
         .olive-grad { background: linear-gradient(135deg, #5F6F52 0%, #3E4B34 100%); }
         .card-glass { 
             background: rgba(255, 255, 255, 0.8); 
             backdrop-filter: blur(10px); 
             border: 1px solid rgba(255, 255, 255, 0.5); 
-            border-radius: 28px; 
+            border-radius: 24px; 
         }
-        .pulse-red { animation: pulse 1.5s infinite; }
-        @keyframes pulse { 
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 
-            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } 
-        }
-        .loading-dots:after { content: ' .'; animation: dots 1s steps(5, end) infinite; }
-        @keyframes dots { 
-            0%, 20% { color: rgba(0,0,0,0); text-shadow: .2em 0 0 rgba(0,0,0,0), .4em 0 0 rgba(0,0,0,0); } 
-            40% { color: #3E4B34; text-shadow: .2em 0 0 rgba(0,0,0,0), .4em 0 0 rgba(0,0,0,0); } 
-            60% { text-shadow: .2em 0 0 #3E4B34, .4em 0 0 rgba(0,0,0,0); } 
-            80%, 100% { text-shadow: .2em 0 0 #3E4B34, .4em 0 0 #3E4B34; } 
-        }
+        .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .loading-dots:after { content: '.'; animation: dots 1s infinite; }
+        @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60% { content: '...'; } }
     </style>
 </head>
 <body>
@@ -59,194 +38,129 @@
             const [view, setView] = useState('home');
             const [input, setInput] = useState('');
             const [loading, setLoading] = useState(false);
-            const [isListening, setIsListening] = useState(false);
-            const [tasks, setTasks] = useState(() => JSON.parse(localStorage.getItem('mom_ultra_data') || '[]'));
-            const recognitionRef = useRef(null);
-            const apiKey = ""; // API Key provided at runtime
+            const [tasks, setTasks] = useState(() => {
+                const saved = localStorage.getItem('mama_app_tasks');
+                return saved ? JSON.parse(saved) : [];
+            });
 
-            // Save to LocalStorage
+            // Ключ API для работы вне песочницы (пустой для безопасности)
+            const apiKey = ""; 
+
             useEffect(() => {
-                localStorage.setItem('mom_ultra_data', JSON.stringify(tasks));
+                localStorage.setItem('mama_app_tasks', JSON.stringify(tasks));
             }, [tasks]);
 
-            // Speech Recognition Setup
-            useEffect(() => {
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                if (SpeechRecognition) {
-                    recognitionRef.current = new SpeechRecognition();
-                    recognitionRef.current.lang = 'ru-RU';
-                    recognitionRef.current.continuous = false;
-                    recognitionRef.current.onresult = (event) => {
-                        const transcript = event.results[0][0].transcript;
-                        setInput(prev => prev + ' ' + transcript);
-                        setIsListening(false);
-                    };
-                    recognitionRef.current.onend = () => setIsListening(false);
-                    recognitionRef.current.onerror = () => setIsListening(false);
-                }
-            }, []);
-
-            const toggleListening = () => {
-                if (isListening) {
-                    recognitionRef.current?.stop();
-                } else {
-                    try {
-                        recognitionRef.current?.start();
-                        setIsListening(true);
-                    } catch (e) {
-                        alert("Ошибка микрофона. Проверьте разрешения.");
-                    }
-                }
-            };
-
-            const handlePhoto = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                setLoading(true);
-                const reader = new FileReader();
-                reader.onloadend = async () => {
-                    const base64Data = reader.result.split(',')[1];
-                    await callAI("Проанализируй это фото (записка, список или ситуация) и составь план для мамы.", base64Data);
-                };
-                reader.readAsDataURL(file);
-            };
-
             const callAI = async (textPrompt, imageData = null) => {
+                if (!textPrompt && !imageData) return;
                 setLoading(true);
-                const systemPrompt = `Ты - эмпатичный ИИ-помощник "Чистая Голова" для мам. 
-                Твои правила:
-                1. Если текст с ошибками, опечатками или несвязный - расшифруй смысл.
-                2. Раздели задачи на блоки: ДОМ, ДЕТИ, Я.
-                3. Выдели ОДНУ главную задачу дня.
-                4. Напиши теплое подбадривание.
-                Будь структурированным и добрым.`;
 
-                const fetchWithRetry = async (retries = 3, backoff = 1000) => {
-                    const payload = imageData 
-                        ? { contents: [{ parts: [{ text: systemPrompt + " " + textPrompt }, { inlineData: { mimeType: "image/png", data: imageData } }] }] }
-                        : { contents: [{ parts: [{ text: systemPrompt + " Обработай этот текст: " + textPrompt }] }] };
+                const systemPrompt = "Ты помощник для мам. Разбери хаос в тексте на категории: Срочно, Дети, Быт. Напиши кратко и с поддержкой.";
+                
+                // ВАЖНО: Если запускаешь локально, нужен свой ключ Gemini API
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
-                    for (let i = 0; i < retries; i++) {
-                        try {
-                            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(payload)
-                            });
-                            if (!res.ok) throw new Error();
-                            return await res.json();
-                        } catch (e) {
-                            if (i === retries - 1) throw e;
-                            await new Promise(r => setTimeout(r, backoff * Math.pow(2, i)));
-                        }
-                    }
+                const payload = {
+                    contents: [{
+                        parts: [
+                            { text: `${systemPrompt}\n\nПользователь пишет: ${textPrompt}` },
+                            ...(imageData ? [{ inlineData: { mimeType: "image/png", data: imageData } }] : [])
+                        ]
+                    }]
                 };
 
                 try {
-                    const data = await fetchWithRetry();
-                    const aiResult = data.candidates?.[0]?.content?.parts?.[0]?.text || "Не удалось расшифровать. Попробуй еще раз!";
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) throw new Error('Ошибка API');
                     
+                    const data = await response.json();
+                    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Не удалось разобрать текст.";
+
                     const newTask = {
                         id: Date.now(),
-                        type: imageData ? '📷 Фото' : '✍️ Текст',
-                        content: aiResult,
-                        date: new Date().toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                        content: aiText,
+                        raw: textPrompt || "Анализ фото",
+                        date: new Date().toLocaleDateString('ru-RU')
                     };
 
                     setTasks([newTask, ...tasks]);
                     setView('history');
                     setInput('');
                 } catch (err) {
-                    alert("ИИ временно недоступен. Проверь интернет или попробуй позже.");
+                    console.error(err);
+                    alert("Ошибка: Не удалось связаться с ИИ. Если вы запускаете это на Vercel, убедитесь, что в коде указан API Key.");
                 } finally {
                     setLoading(false);
                 }
             };
 
+            const handlePhoto = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onloadend = () => callAI("", reader.result.split(',')[1]);
+                reader.readAsDataURL(file);
+            };
+
             return (
-                <div className="app-shell shadow-2xl overflow-hidden">
-                    {/* Header */}
-                    <header className="p-6 flex justify-between items-center bg-[#fcfbf4] sticky top-0 z-10">
-                        <div className="flex items-center space-x-2">
-                            <span className="text-2xl">🌿</span>
-                            <h1 className="text-xl font-extrabold text-[#3E4B34]">Чистая Голова</h1>
-                        </div>
-                        <button onClick={() => setView('history')} className="text-xs font-bold text-[#5F6F52] bg-[#5F6F52]/10 px-4 py-2 rounded-full">Архив</button>
+                <div className="max-w-md mx-auto min-h-screen flex flex-col bg-[#fcfbf4] relative shadow-xl">
+                    <header className="p-6 flex justify-between items-center">
+                        <h1 className="font-extrabold text-xl text-[#3E4B34] flex items-center">
+                            <span className="mr-2">🌿</span> Чистая Голова
+                        </h1>
+                        <button onClick={() => setView('history')} className="text-xs font-bold bg-[#5F6F52]/10 text-[#5F6F52] px-4 py-2 rounded-full">Архив</button>
                     </header>
 
-                    <main className="flex-1 px-6 overflow-y-auto">
+                    <main className="flex-1 px-6 pb-24">
                         {view === 'home' && (
-                            <div className="space-y-8 py-4">
-                                <div className="olive-grad p-8 rounded-[40px] text-white shadow-lg relative">
-                                    <h2 className="text-2xl font-light">Привет, <span className="font-extrabold">дорогая.</span></h2>
-                                    <p className="mt-2 text-white/80 text-sm">Готова выгрузить хаос из головы?</p>
-                                    <div className="absolute -bottom-2 -right-2 opacity-20 text-6xl rotate-12">✨</div>
+                            <div className="space-y-6">
+                                <div className="olive-grad p-8 rounded-[32px] text-white shadow-lg">
+                                    <p className="text-white/80 text-sm mb-1">Сегодня {new Date().toLocaleDateString('ru-RU')}</p>
+                                    <h2 className="text-2xl font-bold">Выгрузи мысли, <br/>чтобы отдохнуть.</h2>
                                 </div>
 
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <button onClick={() => setView('input')} className="card-glass p-6 text-left active:scale-95 transition-all">
-                                            <span className="text-3xl block mb-2">✍️</span>
-                                            <span className="font-bold text-[#3E4B34] text-sm">Текст</span>
-                                        </button>
-                                        <label className="card-glass p-6 text-left active:scale-95 transition-all cursor-pointer">
-                                            <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
-                                            <span className="text-3xl block mb-2">📷</span>
-                                            <span className="font-bold text-[#3E4B34] text-sm">Фото</span>
-                                        </label>
-                                    </div>
-                                    <button 
-                                        onClick={toggleListening}
-                                        className={`w-full p-6 rounded-[28px] card-glass flex items-center justify-center space-x-4 border-2 transition-all ${isListening ? 'border-red-500 pulse-red' : 'border-transparent'}`}
-                                    >
-                                        <span className="text-3xl">{isListening ? '🛑' : '🎤'}</span>
-                                        <span className="font-bold text-[#3E4B34]">{isListening ? 'Слушаю тебя...' : 'Надиктовать голосом'}</span>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <button onClick={() => setView('input')} className="card-glass p-6 text-center hover:bg-white transition-colors">
+                                        <div className="text-3xl mb-2">✍️</div>
+                                        <div className="font-bold text-[#3E4B34]">Текст</div>
                                     </button>
+                                    <label className="card-glass p-6 text-center cursor-pointer hover:bg-white transition-colors">
+                                        <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+                                        <div className="text-3xl mb-2">📷</div>
+                                        <div className="font-bold text-[#3E4B34]">Фото</div>
+                                    </label>
                                 </div>
                             </div>
                         )}
 
                         {view === 'input' && (
-                            <div className="space-y-4 py-4">
+                            <div className="space-y-4">
                                 <textarea 
-                                    autoFocus
-                                    className="w-full h-72 p-8 rounded-[40px] card-glass outline-none text-lg shadow-inner border-0 placeholder:text-gray-300"
-                                    placeholder="Пиши всё как есть, я пойму даже с ошибками..."
+                                    className="w-full h-64 p-6 rounded-3xl card-glass border-0 focus:ring-2 focus:ring-[#5F6F52] text-lg outline-none"
+                                    placeholder="Напиши всё, что крутится в голове..."
                                     value={input}
                                     onChange={(e) => setInput(e.target.value)}
                                 />
-                                <div className="flex space-x-3">
+                                <div className="flex space-x-2">
                                     <button onClick={() => setView('home')} className="flex-1 py-4 bg-gray-200 rounded-2xl font-bold text-gray-500">Назад</button>
-                                    <button 
-                                        onClick={() => callAI(input)}
-                                        disabled={!input.trim()}
-                                        className="flex-[2] py-4 olive-grad text-white rounded-2xl font-bold shadow-lg disabled:opacity-50"
-                                    >
-                                        РАЗОБРАТЬ
-                                    </button>
+                                    <button onClick={() => callAI(input)} className="flex-[2] py-4 olive-grad text-white rounded-2xl font-bold">РАЗОБРАТЬ</button>
                                 </div>
                             </div>
                         )}
 
                         {view === 'history' && (
-                            <div className="space-y-6 py-4 pb-24">
-                                <div className="flex justify-between items-center">
-                                    <h3 className="text-lg font-bold text-[#3E4B34]">Твои разборы</h3>
-                                    <button onClick={() => { if(confirm('Очистить всё?')) setTasks([]) }} className="text-[10px] font-bold text-red-400 uppercase">Удалить всё</button>
-                                </div>
+                            <div className="space-y-4">
                                 {tasks.length === 0 ? (
-                                    <div className="text-center py-20 text-gray-300 italic">Пока пусто. Давай что-нибудь запишем?</div>
+                                    <div className="text-center py-20 text-gray-400 italic">Тут пока пусто...</div>
                                 ) : (
-                                    tasks.map(task => (
-                                        <div key={task.id} className="card-glass p-7 border-l-8 border-[#5F6F52] shadow-sm">
-                                            <div className="flex justify-between text-[10px] font-bold text-gray-400 mb-4 uppercase tracking-widest">
-                                                <span>{task.date}</span>
-                                                <span>{task.type}</span>
-                                            </div>
-                                            <div className="text-sm text-[#3E4B34] leading-relaxed whitespace-pre-wrap font-medium">
-                                                {task.content}
-                                            </div>
+                                    tasks.map(t => (
+                                        <div key={t.id} className="card-glass p-6 border-l-4 border-[#5F6F52]">
+                                            <div className="text-[10px] text-gray-400 font-bold mb-2 uppercase tracking-widest">{t.date}</div>
+                                            <div className="text-[#3E4B34] whitespace-pre-wrap leading-relaxed">{t.content}</div>
                                         </div>
                                     ))
                                 )}
@@ -254,25 +168,10 @@
                         )}
                     </main>
 
-                    {/* Footer Nav */}
-                    <nav className="fixed bottom-0 left-0 right-0 h-24 bg-white/70 backdrop-blur-lg flex items-center justify-around px-10 border-t border-gray-100 max-w-[430px] mx-auto">
-                        <button onClick={() => setView('home')} className={`p-4 rounded-2xl transition-all ${view === 'home' ? 'bg-[#5F6F52] text-white shadow-lg' : 'text-gray-400'}`}>
-                            🏠
-                        </button>
-                        <button onClick={() => setView('input')} className="w-14 h-14 bg-[#5F6F52] rounded-3xl text-white text-2xl shadow-xl flex items-center justify-center -translate-y-6 active:scale-90 transition-all">
-                            +
-                        </button>
-                        <button onClick={() => setView('history')} className={`p-4 rounded-2xl transition-all ${view === 'history' ? 'bg-[#5F6F52] text-white shadow-lg' : 'text-gray-400'}`}>
-                            📜
-                        </button>
-                    </nav>
-
-                    {/* Loading Overlay */}
                     {loading && (
-                        <div className="fixed inset-0 bg-[#fcfbf4]/95 backdrop-blur-md z-[100] flex flex-col items-center justify-center text-center px-10">
-                            <div className="text-5xl animate-bounce mb-6">🧘‍♀️</div>
-                            <h3 className="text-xl font-extrabold text-[#3E4B34] loading-dots">Наводим порядок</h3>
-                            <p className="text-sm text-gray-400 mt-3 leading-relaxed">Пока ИИ разбирает твои мысли, сделай глубокий вдох и выдох...</p>
+                        <div className="fixed inset-0 bg-[#fcfbf4]/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+                            <div className="text-4xl animate-bounce">🧘‍♀️</div>
+                            <div className="mt-4 font-bold text-[#3E4B34] loading-dots text-xl">Наводим порядок</div>
                         </div>
                     )}
                 </div>
